@@ -29,8 +29,11 @@ def add_row(path, cols, row):
 
 
 st.title("食品工場 ロット紐づけ管理")
-t1, t2, t3 = st.tabs(["1.原料受入", "2.仕込み紐づけ", "3.追跡・一覧"])
+t1, t2, t3 = st.tabs(["1.原料受入", "2.仕込み紐づけ", "3.双方向トレース検索"])
 
+# ==========================================
+# タブ1：原料受入登録
+# ==========================================
 with t1:
     with st.form("f_recv", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
@@ -63,6 +66,9 @@ with t1:
     df_r = load_df(R_FILE, R_COLS)
     st.dataframe(df_r, use_container_width=True, hide_index=True)
 
+# ==========================================
+# タブ2：仕込み紐づけ
+# ==========================================
 with t2:
     df_r = load_df(R_FILE, R_COLS)
     act = df_r[df_r["状態"] == "使用中"]
@@ -111,17 +117,67 @@ with t2:
                     df_r.to_csv(R_FILE, index=False, encoding="utf-8-sig")
                 st.success(f"紐づけ完了: {p_lot.strip()} <= {sel_m}({sel_lot})")
 
+# ==========================================
+# タブ3：双方向トレース検索
+# ==========================================
 with t3:
+    df_r = load_df(R_FILE, R_COLS)
     df_p = load_df(P_FILE, P_COLS)
-    kw = st.text_input("検索（製品名・製造ロットNo・原料ロットNo）")
-    if kw.strip() and not df_p.empty:
-        k = kw.strip()
-        m = (
-            df_p["製品名"].str.contains(k, na=False)
-            | df_p["製造ロットNo"].str.contains(k, na=False)
-            | df_p["原料ロットNo"].str.contains(k, na=False)
-        )
-        df_p = df_p[m]
-    st.dataframe(df_p, use_container_width=True, hide_index=True)
-    csv = df_p.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("CSVダウンロード", csv, "trace.csv", "text/csv")
+
+    if df_p.empty:
+        st.info("まだ仕込み・紐づけ記録がありません")
+    else:
+        r_info = df_r[["原料名", "ロットNo", "仕入先", "賞味期限"]]
+        merged = pd.merge(
+            df_p,
+            r_info,
+            left_on=["使用原料", "原料ロットNo"],
+            right_on=["原料名", "ロットNo"],
+            how="left",
+        ).drop(columns=["原料名", "ロットNo"])
+
+        m_back = "トレースバック（製品ロット → 使用原料を追跡）"
+        m_fwd = "トレースフォワード（原料ロット → 製造された製品を追跡）"
+        mode = st.radio("追跡方向を選択", [m_back, m_fwd], horizontal=True)
+
+        if mode == m_back:
+            c1, c2 = st.columns(2)
+            p_lots = ["すべて"] + sorted(merged["製造ロットNo"].dropna().unique().tolist())
+            sel_p_lot = c1.selectbox("製造ロットNoを選択", p_lots)
+            kw_p = c2.text_input("または製品名・ロット一部で検索")
+
+            res = merged.copy()
+            if sel_p_lot != "すべて":
+                res = res[res["製造ロットNo"] == sel_p_lot]
+            if kw_p.strip():
+                k = kw_p.strip()
+                cond = res["製造ロットNo"].str.contains(k, na=False) | res["製品名"].str.contains(k, na=False)
+                res = res[cond]
+
+            st.subheader(f"使用された原料ロット一覧（{len(res)}件）")
+            cols_back = ["製造ロットNo", "製品名", "仕込み日時", "使用原料", "原料ロットNo", "仕入先", "賞味期限", "使用数量", "単位", "担当者"]
+            st.dataframe(res[cols_back], use_container_width=True, hide_index=True)
+            fname = "traceback.csv"
+
+        else:
+            c1, c2, c3 = st.columns(3)
+            sel_mat_f = c1.selectbox("原料名で絞り込み", ["すべて"] + MATS)
+            sub_m = merged if sel_mat_f == "すべて" else merged[merged["使用原料"] == sel_mat_f]
+            r_lots = ["すべて"] + sorted(sub_m["原料ロットNo"].dropna().unique().tolist())
+            sel_r_lot = c2.selectbox("原料ロットNoを選択", r_lots)
+            kw_r = c3.text_input("または原料ロット一部で検索")
+
+            res = sub_m.copy()
+            if sel_r_lot != "すべて":
+                res = res[res["原料ロットNo"] == sel_r_lot]
+            if kw_r.strip():
+                k = kw_r.strip()
+                res = res[res["原料ロットNo"].str.contains(k, na=False)]
+
+            st.subheader(f"この原料が使用された製品バッチ一覧（{len(res)}件）")
+            cols_fwd = ["使用原料", "原料ロットNo", "仕入先", "賞味期限", "製造ロットNo", "製品名", "仕込み日時", "使用数量", "単位", "担当者"]
+            st.dataframe(res[cols_fwd], use_container_width=True, hide_index=True)
+            fname = "traceforward.csv"
+
+        csv = res.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("検索結果をCSVダウンロード", csv, fname, "text/csv")
