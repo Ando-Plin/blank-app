@@ -8,10 +8,13 @@ st.set_page_config(page_title="トレーサビリティ", layout="wide")
 JST = ZoneInfo("Asia/Tokyo")
 RF = "raw_materials.csv"
 PF = "production_batches.csv"
+SF = "shipments.csv"
+
 MATS = ["小麦粉", "液卵", "イースト", "乳化剤", "全粒粉"]
-UNITS = ["kg", "g", "L", "mL", "袋", "箱", "本"]
+UNITS = ["kg", "g", "L", "mL", "袋", "箱", "本", "個", "ケース"]
 RC = ["受入日時", "原料名", "ロットNo", "仕入先", "受入数量", "単位", "賞味期限", "状態"]
 PC = ["仕込み日時", "製品名", "製造ロットNo", "使用原料", "原料ロットNo", "使用数量", "単位", "担当者"]
+SC = ["納品日", "納品先", "製造ロットNo", "製品名", "納品量", "単位", "備考"]
 
 
 def load_df(p, c):
@@ -27,8 +30,11 @@ def save_df(p, df):
 
 
 st.title("トレーサビリティ")
-t1, t2, t3 = st.tabs(["1.原料受入", "2.仕込み紐づけ", "3.双方向トレース"])
+t1, t2, t3, t4 = st.tabs(["1.原料受入", "2.仕込み紐づけ", "3.出荷・納品登録", "4.双方向トレース"])
 
+# ==========================================
+# タブ1：原料受入登録・編集
+# ==========================================
 with t1:
     with st.form("f1", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
@@ -58,6 +64,9 @@ with t1:
             save_df(RF, ed_r)
             st.rerun()
 
+# ==========================================
+# タブ2：仕込み紐づけ・編集
+# ==========================================
 with t2:
     df_r = load_df(RF, RC)
     act = df_r[df_r["状態"] == "使用中"]
@@ -100,26 +109,74 @@ with t2:
             save_df(PF, ed_p)
             st.rerun()
 
+# ==========================================
+# タブ3：出荷・納品登録・編集（製造ロット紐づけ）
+# ==========================================
 with t3:
+    df_p = load_df(PF, PC)
+    if df_p.empty:
+        st.warning("先に「2.仕込み紐づけ」で製造ロットを登録してください")
+    else:
+        p_lots = sorted(df_p["製造ロットNo"].unique().tolist(), reverse=True)
+        sel_plot = st.selectbox("1.出荷する製造ロットNoを選択", p_lots)
+        auto_prod = df_p[df_p["製造ロットNo"] == sel_plot]["製品名"].iloc[0]
+
+        with st.form("f3", clear_on_submit=True):
+            s1, s2, s3 = st.columns(3)
+            s_date = s1.date_input("納品日", value=datetime.now(JST).date())
+            dest = s1.text_input("納品先（取引先・店舗名）")
+            s_prod = s2.text_input("製品名", value=auto_prod)
+            s_qty = s2.number_input("納品量", min_value=1.0, value=10.0, step=1.0)
+            s_unit = s3.selectbox("単位", UNITS, index=6)
+            memo = s3.text_input("備考（伝票Noなど）")
+            ok3 = st.form_submit_button("納品データを登録", type="primary")
+
+        if ok3:
+            if not dest.strip():
+                st.error("納品先を入力してください")
+            else:
+                srow = {"納品日": str(s_date), "納品先": dest.strip(), "製造ロットNo": sel_plot, "製品名": s_prod.strip(), "納品量": str(s_qty), "単位": s_unit, "備考": memo.strip()}
+                save_df(SF, pd.concat([load_df(SF, SC), pd.DataFrame([srow])], ignore_index=True))
+                st.success(f"納品登録完了: {dest.strip()} へ {sel_plot} を {s_qty}{s_unit} 出荷")
+
+    st.subheader("出荷・納品一覧（直接編集・削除可）")
+    df_s = load_df(SF, SC)
+    if not df_s.empty:
+        cfg_s = {"単位": st.column_config.SelectboxColumn(options=UNITS)}
+        ed_s = st.data_editor(df_s, column_config=cfg_s, num_rows="dynamic", use_container_width=True, hide_index=True, key="es")
+        if st.button("納品の変更を保存", type="primary"):
+            save_df(SF, ed_s)
+            st.rerun()
+
+# ==========================================
+# タブ4：双方向トレース（原料 ⇔ 製造 ⇔ 納品先）
+# ==========================================
+with t4:
     df_r = load_df(RF, RC)[["原料名", "ロットNo", "仕入先", "賞味期限"]].drop_duplicates(["原料名", "ロットNo"])
     df_p = load_df(PF, PC)
+    df_s = load_df(SF, SC)
+
     if df_p.empty:
         st.info("記録がありません")
     else:
         mg = pd.merge(df_p, df_r, left_on=["使用原料", "原料ロットNo"], right_on=["原料名", "ロットNo"], how="left").drop(columns=["原料名", "ロットNo"])
-        mode = st.radio("追跡方向", ["トレースバック（製品→原料）", "トレースフォワード（原料→製品）"], horizontal=True)
+        s_sub = df_s[["製造ロットNo", "納品日", "納品先", "納品量", "単位"]].rename(columns={"単位": "納品単位"})
+        full = pd.merge(mg, s_sub, on="製造ロットNo", how="left").fillna("-")
+
+        mode = st.radio("追跡方向", ["トレースバック（納品先・製品ロット → 原料）", "トレースフォワード（原料ロット → 製品・納品先）"], horizontal=True)
         if "バック" in mode:
             c1, c2 = st.columns(2)
-            sp = c1.selectbox("製造ロットNo", ["すべて"] + sorted(mg["製造ロットNo"].unique().tolist()))
-            kp = c2.text_input("製品名・ロット検索")
-            res = mg[mg["製造ロットNo"] == sp] if sp != "すべて" else mg
+            sp = c1.selectbox("製造ロットNo", ["すべて"] + sorted(full["製造ロットNo"].unique().tolist()))
+            kp = c2.text_input("納品先・製品名・ロット検索")
+            res = full[full["製造ロットNo"] == sp] if sp != "すべて" else full
             if kp.strip():
-                res = res[res["製造ロットNo"].str.contains(kp.strip(), na=False) | res["製品名"].str.contains(kp.strip(), na=False)]
+                k = kp.strip()
+                res = res[res["製造ロットNo"].str.contains(k, na=False) | res["製品名"].str.contains(k, na=False) | res["納品先"].str.contains(k, na=False)]
             fname = "traceback.csv"
         else:
             c1, c2, c3 = st.columns(3)
             sf = c1.selectbox("原料名", ["すべて"] + MATS)
-            sub = mg if sf == "すべて" else mg[mg["使用原料"] == sf]
+            sub = full if sf == "すべて" else full[full["使用原料"] == sf]
             sr = c2.selectbox("原料ロットNo", ["すべて"] + sorted(sub["原料ロットNo"].unique().tolist()))
             kr = c3.text_input("原料ロット検索")
             res = sub[sub["原料ロットNo"] == sr] if sr != "すべて" else sub
