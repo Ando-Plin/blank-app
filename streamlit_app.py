@@ -1,8 +1,7 @@
 import os
-from datetime import datetime, date
+from datetime import datetime
 from zoneinfo import ZoneInfo
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 st.set_page_config(page_title="食品工場 入場衛生チェック表", layout="wide")
@@ -14,7 +13,7 @@ COLUMNS = [
     "体温", "持ち込み禁止物", "怪我の有無", "判定", "備考"
 ]
 
-# --- データ読み書き関数（実運用時はGoogleスプレッドシート等に差し替え推奨） ---
+# --- データ読み書き関数 ---
 def load_data() -> pd.DataFrame:
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
@@ -81,7 +80,6 @@ with tab_input:
             st.error("氏名を入力してください。")
         else:
             now_jst = datetime.now(JST)
-            # 基準判定
             is_ng = (temperature >= 37.5) or (prohibited_items == "あり") or (injury_status == "あり")
             judgment = "要確認（保留）" if is_ng else "入場可"
 
@@ -115,7 +113,6 @@ with tab_summary:
     if df.empty:
         st.info("まだ記録がありません。「入場チェック入力」タブからデータを登録してください。")
     else:
-        # 期間フィルタ
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             target_date = st.date_input("集計対象日", value=datetime.now(JST).date())
@@ -135,18 +132,17 @@ with tab_summary:
 
         st.divider()
 
-        # グラフと要確認者リスト
+        # グラフと要確認者リスト（標準の st.bar_chart を使用）
         col_chart1, col_chart2 = st.columns(2)
         with col_chart1:
             st.markdown("**部署別 チェック人数**")
-            dept_counts = daily_df.groupby(["部署", "判定"], as_index=False).size()
-            fig_dept = px.bar(
-                dept_counts, x="部署", y="size", color="判定",
-                barmode="stack", text_auto=True,
-                labels={"size": "人数"},
-                color_discrete_map={"入場可": "#2E8B57", "要確認（保留）": "#DC143C"}
-            )
-            st.plotly_chart(fig_dept, use_container_width=True)
+            if not daily_df.empty:
+                dept_pivot = daily_df.pivot_table(
+                    index="部署", columns="判定", values="氏名", aggfunc="count", fill_value=0
+                )
+                st.bar_chart(dept_pivot, color=["#2E8B57" if c == "入場可" else "#DC143C" for c in dept_pivot.columns])
+            else:
+                st.write("表示できるデータがありません。")
 
         with col_chart2:
             st.markdown("**要確認（保留）対象者リスト**")
