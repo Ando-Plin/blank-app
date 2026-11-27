@@ -4,10 +4,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(
-    page_title="食品工場 トレーサビリティ",
-    layout="wide",
-)
+st.set_page_config(page_title="食品工場 ロット管理", layout="wide")
 
 JST = ZoneInfo("Asia/Tokyo")
 RECV_FILE = "raw_materials.csv"
@@ -43,31 +40,27 @@ PREP_COLS = [
 ]
 
 
-def load_csv(file_path: str, columns: list[str]) -> pd.DataFrame:
+def load_csv(file_path, columns):
     if os.path.exists(file_path):
-        dtype_map = {
-            "ロットNo": str,
-            "製造ロットNo": str,
-            "使用原料ロットNo": str,
-        }
-        return pd.read_csv(file_path, dtype=dtype_map)
+        dtypes = {"ロットNo": str, "製造ロットNo": str, "使用原料ロットNo": str}
+        return pd.read_csv(file_path, dtype=dtypes)
     return pd.DataFrame(columns=columns)
 
 
-def append_csv(file_path: str, columns: list[str], record: dict) -> None:
+def append_csv(file_path, columns, record):
     df = load_csv(file_path, columns)
     df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
     df.to_csv(file_path, index=False, encoding="utf-8-sig")
 
 
-def update_recv_status(material_name: str, lot_no: str, new_status: str) -> None:
+def update_recv_status(material_name, lot_no, new_status):
     df = load_csv(RECV_FILE, RECV_COLS)
     mask = (df["原料名"] == material_name) & (df["ロットNo"] == lot_no)
     df.loc[mask, "ステータス"] = new_status
     df.to_csv(RECV_FILE, index=False, encoding="utf-8-sig")
 
 
-st.title("📦 食品工場 原料受入・仕込みロット管理")
+st.title("食品工場 原料受入・仕込みロット管理")
 st.caption("原料受入ロットの登録と、仕込み時のロット紐づけ・追跡を行います。")
 
 tab_recv, tab_prep, tab_trace = st.tabs([
@@ -80,28 +73,24 @@ tab_recv, tab_prep, tab_trace = st.tabs([
 # タブ1：原料受入時のロット登録
 # ==========================================
 with tab_recv:
-    st.subheader("原料受入・ロット№ 登録")
+    st.subheader("原料受入・ロットNo 登録")
     with st.form("receive_form", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
         with c1:
             mat_name = st.selectbox("原料名", MATERIAL_LIST)
             supplier = st.text_input("仕入先", placeholder="例：〇〇製粉")
         with c2:
-            lot_no = st.text_input("原料ロット№", placeholder="例：LOT-20261127-A")
+            lot_no = st.text_input("原料ロットNo", placeholder="例：LOT-20261127-A")
             exp_date = st.date_input("賞味期限", value=datetime.now(JST).date())
         with c3:
-            qty = st.number_input(
-                "受入数量", min_value=0.1, value=25.0, step=0.5, format="%.1f"
-            )
+            qty = st.number_input("受入数量", min_value=0.1, value=25.0, step=0.5)
             unit = st.selectbox("単位", UNIT_LIST)
 
-        submitted_recv = st.form_submit_button(
-            "受入データを登録する", type="primary", use_container_width=True
-        )
+        submitted_recv = st.form_submit_button("受入データを登録する", type="primary")
 
     if submitted_recv:
         if not lot_no.strip():
-            st.error("原料ロット№を入力してください。")
+            st.error("原料ロットNoを入力してください。")
         else:
             now_jst = datetime.now(JST)
             record = {
@@ -117,56 +106,8 @@ with tab_recv:
                 "ステータス": "使用中",
             }
             append_csv(RECV_FILE, RECV_COLS, record)
-            st.success(
-                f"受入登録完了：{mat_name}（ロット: {lot_no.strip()} / {qty}{unit}）"
-            )
+            st.success(f"受入登録完了：{mat_name}（ロット: {lot_no.strip()} / {qty}{unit}）")
 
     st.divider()
     st.markdown("**現在の受入原料一覧**")
-    df_recv_view = load_csv(RECV_FILE, RECV_COLS)
-    if df_recv_view.empty:
-        st.info("受入データは未登録です。")
-    else:
-        st.dataframe(
-            df_recv_view.sort_values("受入日時", ascending=False),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-# ==========================================
-# タブ2：仕込み時の原料・ロット紐づけ記録
-# ==========================================
-with tab_prep:
-    st.subheader("仕込み記録（製造ロット × 原料ロット紐づけ）")
-    df_recv = load_csv(RECV_FILE, RECV_COLS)
-    active_recv = df_recv[df_recv["ステータス"] == "使用中"]
-
-    col_sel1, col_sel2 = st.columns(2)
-    with col_sel1:
-        selected_mat = st.selectbox("1. 使用する原料名", MATERIAL_LIST)
-
-    mat_lots_df = active_recv[active_recv["原料名"] == selected_mat]
-
-    with col_sel2:
-        if mat_lots_df.empty:
-            st.warning(f"「{selected_mat}」の有効な受入ロットがありません。")
-            selected_lot_no = None
-        else:
-            lot_options = {}
-            for _, row in mat_lots_df.iterrows():
-                label = (
-                    f"{row['ロットNo']} "
-                    f"(受入:{row['受入日']} / 期限:{row['賞味期限']})"
-                )
-                lot_options[label] = row["ロットNo"]
-
-            selected_lot_label = st.selectbox(
-                "2. 使用する原料ロット№", list(lot_options.keys())
-            )
-            selected_lot_no = lot_options[selected_lot_label]
-
-    if selected_lot_no is not None:
-        unit_series = mat_lots_df[mat_lots_df["ロットNo"] == selected_lot_no]["単位"]
-        default_unit = unit_series.iloc[0]
-        default_unit_idx = (
-            UNIT_LIST.index(default_unit) if default_unit in UNIT_LIST else
+    df_recv_view = load_csv(RECV
