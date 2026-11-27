@@ -1,25 +1,31 @@
-# 🎈 Blank app template
+# 🏭 食品工場 入場衛生チェック表（Streamlit アプリ）
 
-A simple Streamlit app template for you to modify!
+食品工場の製造エリア入場前に実施する衛生チェック（体温・持ち込み禁止物・手指の怪我や皮膚異常）をタブレットやスマートフォンから記録し、日次・部署別に自動集計・CSV出力できる Web アプリケーションです。
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+## 🔗 公開アプリ URL
 
-### How to run it on your own machine
+- **本番アプリ:** https://blank-app-i3grnklynm.streamlit.app/
 
-Prerequisite: install `uv` if you don't already have it.
+> 現場のタブレットやスマートフォンのブラウザで上記 URL を開き、ホーム画面に追加しておくとスムーズに運用できます。
 
-```
-$ curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+## 主な機能
 
-1. Sync the dependencies
+1. **入場衛生チェック入力（`📝 入場チェック入力` タブ）**
+   - 部署・製造ラインの選択、氏名の入力
+   - **体温（℃）**、**持ち込み禁止物の有無**、**手指の怪我・皮膚異常の有無** の記録
+   - 基準値（体温 37.5℃以上、禁止物「あり」、怪我「あり」）に基づく **「入場可」「要確認（保留）」の自動判定** と警告アラート表示
+   - 日本標準時（JST）での自動タイムスタンプ記録
 
-   ```
-   $ uv sync
-   ```
+2. **日次・部署別集計レポート（`📊 日次・月次集計レポート` タブ）**
+   - 対象日・部署ごとの KPI サマリー表示（総チェック数、入場可、要確認、禁止物あり、怪我あり）
+   - 部署別のチェック人数内訳グラフ（`st.bar_chart`）
+   - 「要確認（保留）」対象者の自動抽出リスト
+   - 全履歴の一覧表示および対象日データの CSV ダウンロード（Excel 文字化け防止の UTF-8 BOM 付き）
 
-2. Run the app
+## ファイル構成
 
-   ```
-   $ uv run streamlit run streamlit_app.py
-   ```
+```text
+.
+├── streamlit_app.py   # アプリケーション本体
+├── requirements.txt   # 依存パッケージ定義（任意）
+└── README.md          # 本ドキュメント
