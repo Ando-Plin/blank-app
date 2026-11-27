@@ -16,7 +16,9 @@ P_COLS = ["仕込み日時", "製品名", "製造ロットNo", "使用原料", "
 
 def load_df(path, cols):
     if os.path.exists(path):
-        return pd.read_csv(path, dtype=str)
+        df = pd.read_csv(path, dtype=str)
+        if list(df.columns) == cols:
+            return df
     return pd.DataFrame(columns=cols)
 
 
