@@ -4,110 +4,122 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="食品工場 ロット管理", layout="wide")
-
+st.set_page_config(page_title="ロット管理", layout="wide")
 JST = ZoneInfo("Asia/Tokyo")
-RECV_FILE = "raw_materials.csv"
-PREP_FILE = "production_batches.csv"
-
-MATERIAL_LIST = ["小麦粉", "液卵", "イースト", "乳化剤", "全粒粉"]
-UNIT_LIST = ["kg", "g", "L", "mL", "袋", "箱", "本"]
-
-RECV_COLS = [
-    "受入ID",
-    "受入日時",
-    "受入日",
-    "原料名",
-    "ロットNo",
-    "仕入先",
-    "受入数量",
-    "単位",
-    "賞味期限",
-    "ステータス",
-]
-
-PREP_COLS = [
-    "仕込みID",
-    "仕込み日時",
-    "仕込み日",
-    "製品名",
-    "製造ロットNo",
-    "使用原料名",
-    "使用原料ロットNo",
-    "使用数量",
-    "単位",
-    "担当者",
-]
+R_FILE = "raw_materials.csv"
+P_FILE = "production_batches.csv"
+MATS = ["小麦粉", "液卵", "イースト", "乳化剤", "全粒粉"]
+UNITS = ["kg", "g", "L", "mL", "袋", "箱", "本"]
+R_COLS = ["受入日時", "原料名", "ロットNo", "仕入先", "受入数量", "単位", "賞味期限", "状態"]
+P_COLS = ["仕込み日時", "製品名", "製造ロットNo", "使用原料", "原料ロットNo", "使用数量", "単位", "担当者"]
 
 
-def load_csv(file_path, columns):
-    if os.path.exists(file_path):
-        dtypes = {"ロットNo": str, "製造ロットNo": str, "使用原料ロットNo": str}
-        return pd.read_csv(file_path, dtype=dtypes)
-    return pd.DataFrame(columns=columns)
+def load_df(path, cols):
+    if os.path.exists(path):
+        return pd.read_csv(path, dtype=str)
+    return pd.DataFrame(columns=cols)
 
 
-def append_csv(file_path, columns, record):
-    df = load_csv(file_path, columns)
-    df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
-    df.to_csv(file_path, index=False, encoding="utf-8-sig")
+def add_row(path, cols, row):
+    df = load_df(path, cols)
+    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
-def update_recv_status(material_name, lot_no, new_status):
-    df = load_csv(RECV_FILE, RECV_COLS)
-    mask = (df["原料名"] == material_name) & (df["ロットNo"] == lot_no)
-    df.loc[mask, "ステータス"] = new_status
-    df.to_csv(RECV_FILE, index=False, encoding="utf-8-sig")
+st.title("食品工場 ロット紐づけ管理")
+t1, t2, t3 = st.tabs(["1.原料受入", "2.仕込み紐づけ", "3.追跡・一覧"])
 
-
-st.title("食品工場 原料受入・仕込みロット管理")
-st.caption("原料受入ロットの登録と、仕込み時のロット紐づけ・追跡を行います。")
-
-tab_recv, tab_prep, tab_trace = st.tabs([
-    "1. 原料受入登録",
-    "2. 仕込み・ロット紐づけ",
-    "3. ロット追跡・一覧",
-])
-
-# ==========================================
-# タブ1：原料受入時のロット登録
-# ==========================================
-with tab_recv:
-    st.subheader("原料受入・ロットNo 登録")
-    with st.form("receive_form", clear_on_submit=True):
+with t1:
+    with st.form("f_recv", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
-        with c1:
-            mat_name = st.selectbox("原料名", MATERIAL_LIST)
-            supplier = st.text_input("仕入先", placeholder="例：〇〇製粉")
-        with c2:
-            lot_no = st.text_input("原料ロットNo", placeholder="例：LOT-20261127-A")
-            exp_date = st.date_input("賞味期限", value=datetime.now(JST).date())
-        with c3:
-            qty = st.number_input("受入数量", min_value=0.1, value=25.0, step=0.5)
-            unit = st.selectbox("単位", UNIT_LIST)
+        m_name = c1.selectbox("原料名", MATS)
+        supp = c1.text_input("仕入先")
+        lot = c2.text_input("原料ロットNo")
+        exp = c2.date_input("賞味期限", value=datetime.now(JST).date())
+        qty = c3.number_input("数量", min_value=0.1, value=25.0, step=0.5)
+        unit = c3.selectbox("単位", UNITS)
+        ok1 = st.form_submit_button("受入登録", type="primary")
 
-        submitted_recv = st.form_submit_button("受入データを登録する", type="primary")
-
-    if submitted_recv:
-        if not lot_no.strip():
-            st.error("原料ロットNoを入力してください。")
+    if ok1:
+        if not lot.strip():
+            st.error("ロットNoを入力してください")
         else:
-            now_jst = datetime.now(JST)
-            record = {
-                "受入ID": f"RCV-{now_jst.strftime('%Y%m%d%H%M%S')}",
-                "受入日時": now_jst.strftime("%Y-%m-%d %H:%M:%S"),
-                "受入日": now_jst.strftime("%Y-%m-%d"),
-                "原料名": mat_name,
-                "ロットNo": lot_no.strip(),
-                "仕入先": supplier.strip(),
+            now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+            row = {
+                "受入日時": now,
+                "原料名": m_name,
+                "ロットNo": lot.strip(),
+                "仕入先": supp.strip(),
                 "受入数量": qty,
                 "単位": unit,
-                "賞味期限": exp_date.strftime("%Y-%m-%d"),
-                "ステータス": "使用中",
+                "賞味期限": str(exp),
+                "状態": "使用中",
             }
-            append_csv(RECV_FILE, RECV_COLS, record)
-            st.success(f"受入登録完了：{mat_name}（ロット: {lot_no.strip()} / {qty}{unit}）")
+            add_row(R_FILE, R_COLS, row)
+            st.success(f"登録完了: {m_name} ({lot.strip()})")
 
-    st.divider()
-    st.markdown("**現在の受入原料一覧**")
-    df_recv_view = load_csv(RECV
+    df_r = load_df(R_FILE, R_COLS)
+    st.dataframe(df_r, use_container_width=True, hide_index=True)
+
+with t2:
+    df_r = load_df(R_FILE, R_COLS)
+    act = df_r[df_r["状態"] == "使用中"]
+    col1, col2 = st.columns(2)
+    sel_m = col1.selectbox("1.原料名", MATS)
+    sub = act[act["原料名"] == sel_m]
+
+    if sub.empty:
+        col2.warning(f"{sel_m}の在庫ロットがありません")
+        sel_lot = None
+    else:
+        lots = sub["ロットNo"].tolist()
+        sel_lot = col2.selectbox("2.原料ロットNo", lots)
+
+    if sel_lot:
+        with st.form("f_prep", clear_on_submit=True):
+            p1, p2, p3 = st.columns(3)
+            prod = p1.text_input("製品名")
+            d_lot = f"PRD-{datetime.now(JST).strftime('%Y%m%d')}-01"
+            p_lot = p1.text_input("製造ロットNo", value=d_lot)
+            u_qty = p2.number_input("使用量", min_value=0.1, value=10.0, step=0.5)
+            u_unit = p2.selectbox("単位", UNITS)
+            staff = p3.text_input("担当者")
+            done = p3.checkbox("このロットを使い切りにする")
+            ok2 = st.form_submit_button("紐づけ登録", type="primary")
+
+        if ok2:
+            if not prod.strip() or not p_lot.strip():
+                st.error("製品名と製造ロットNoを入力してください")
+            else:
+                now = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
+                prow = {
+                    "仕込み日時": now,
+                    "製品名": prod.strip(),
+                    "製造ロットNo": p_lot.strip(),
+                    "使用原料": sel_m,
+                    "原料ロットNo": sel_lot,
+                    "使用数量": u_qty,
+                    "単位": u_unit,
+                    "担当者": staff.strip(),
+                }
+                add_row(P_FILE, P_COLS, prow)
+                if done:
+                    idx = (df_r["原料名"] == sel_m) & (df_r["ロットNo"] == sel_lot)
+                    df_r.loc[idx, "状態"] = "使用済"
+                    df_r.to_csv(R_FILE, index=False, encoding="utf-8-sig")
+                st.success(f"紐づけ完了: {p_lot.strip()} <= {sel_m}({sel_lot})")
+
+with t3:
+    df_p = load_df(P_FILE, P_COLS)
+    kw = st.text_input("検索（製品名・製造ロットNo・原料ロットNo）")
+    if kw.strip() and not df_p.empty:
+        k = kw.strip()
+        m = (
+            df_p["製品名"].str.contains(k, na=False)
+            | df_p["製造ロットNo"].str.contains(k, na=False)
+            | df_p["原料ロットNo"].str.contains(k, na=False)
+        )
+        df_p = df_p[m]
+    st.dataframe(df_p, use_container_width=True, hide_index=True)
+    csv = df_p.to_csv(index=False).encode("utf-8-sig")
+    st.download_button("CSVダウンロード", csv, "trace.csv", "text/csv")
