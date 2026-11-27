@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="ロット管理", layout="wide")
+st.set_page_config(page_title="トレーサビリティ", layout="wide")
 JST = ZoneInfo("Asia/Tokyo")
 R_FILE = "raw_materials.csv"
 P_FILE = "production_batches.csv"
@@ -28,7 +28,7 @@ def add_row(path, cols, row):
     df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
-st.title("食品工場 ロット紐づけ管理")
+st.title("トレーサビリティ")
 t1, t2, t3 = st.tabs(["1.原料受入", "2.仕込み紐づけ", "3.双方向トレース検索"])
 
 # ==========================================
