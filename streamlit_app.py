@@ -10,6 +10,7 @@ R_FILE = "raw_materials.csv"
 P_FILE = "production_batches.csv"
 MATS = ["小麦粉", "液卵", "イースト", "乳化剤", "全粒粉"]
 UNITS = ["kg", "g", "L", "mL", "袋", "箱", "本"]
+STATUS_LIST = ["使用中", "使用済"]
 R_COLS = ["受入日時", "原料名", "ロットNo", "仕入先", "受入数量", "単位", "賞味期限", "状態"]
 P_COLS = ["仕込み日時", "製品名", "製造ロットNo", "使用原料", "原料ロットNo", "使用数量", "単位", "担当者"]
 
@@ -18,21 +19,25 @@ def load_df(path, cols):
     if os.path.exists(path):
         df = pd.read_csv(path, dtype=str)
         if list(df.columns) == cols:
-            return df
+            return df.fillna("")
     return pd.DataFrame(columns=cols)
+
+
+def save_df(path, df):
+    df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
 def add_row(path, cols, row):
     df = load_df(path, cols)
     df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-    df.to_csv(path, index=False, encoding="utf-8-sig")
+    save_df(path, df)
 
 
 st.title("トレーサビリティ")
 t1, t2, t3 = st.tabs(["1.原料受入", "2.仕込み紐づけ", "3.双方向トレース検索"])
 
 # ==========================================
-# タブ1：原料受入登録
+# タブ1：原料受入登録・編集
 # ==========================================
 with t1:
     with st.form("f_recv", clear_on_submit=True):
@@ -55,7 +60,7 @@ with t1:
                 "原料名": m_name,
                 "ロットNo": lot.strip(),
                 "仕入先": supp.strip(),
-                "受入数量": qty,
+                "受入数量": str(qty),
                 "単位": unit,
                 "賞味期限": str(exp),
                 "状態": "使用中",
@@ -63,11 +68,32 @@ with t1:
             add_row(R_FILE, R_COLS, row)
             st.success(f"登録完了: {m_name} ({lot.strip()})")
 
+    st.divider()
+    st.subheader("受入一覧（セルを直接クリックして変更・行選択で削除可能）")
     df_r = load_df(R_FILE, R_COLS)
-    st.dataframe(df_r, use_container_width=True, hide_index=True)
+    if df_r.empty:
+        st.info("受入データはまだありません")
+    else:
+        r_cfg = {
+            "原料名": st.column_config.SelectboxColumn("原料名", options=MATS, required=True),
+            "単位": st.column_config.SelectboxColumn("単位", options=UNITS, required=True),
+            "状態": st.column_config.SelectboxColumn("状態", options=STATUS_LIST, required=True),
+        }
+        edited_r = st.data_editor(
+            df_r,
+            column_config=r_cfg,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="ed_recv",
+        )
+        if st.button("受入データの変更を保存", type="primary"):
+            save_df(R_FILE, edited_r)
+            st.success("受入データの変更を保存しました")
+            st.rerun()
 
 # ==========================================
-# タブ2：仕込み紐づけ
+# タブ2：仕込み紐づけ・編集
 # ==========================================
 with t2:
     df_r = load_df(R_FILE, R_COLS)
@@ -106,7 +132,7 @@ with t2:
                     "製造ロットNo": p_lot.strip(),
                     "使用原料": sel_m,
                     "原料ロットNo": sel_lot,
-                    "使用数量": u_qty,
+                    "使用数量": str(u_qty),
                     "単位": u_unit,
                     "担当者": staff.strip(),
                 }
@@ -114,8 +140,31 @@ with t2:
                 if done:
                     idx = (df_r["原料名"] == sel_m) & (df_r["ロットNo"] == sel_lot)
                     df_r.loc[idx, "状態"] = "使用済"
-                    df_r.to_csv(R_FILE, index=False, encoding="utf-8-sig")
+                    save_df(R_FILE, df_r)
                 st.success(f"紐づけ完了: {p_lot.strip()} <= {sel_m}({sel_lot})")
+
+    st.divider()
+    st.subheader("仕込み履歴一覧（セルを直接クリックして変更・行選択で削除可能）")
+    df_p = load_df(P_FILE, P_COLS)
+    if df_p.empty:
+        st.info("仕込みデータはまだありません")
+    else:
+        p_cfg = {
+            "使用原料": st.column_config.SelectboxColumn("使用原料", options=MATS, required=True),
+            "単位": st.column_config.SelectboxColumn("単位", options=UNITS, required=True),
+        }
+        edited_p = st.data_editor(
+            df_p,
+            column_config=p_cfg,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="ed_prep",
+        )
+        if st.button("仕込みデータの変更を保存", type="primary"):
+            save_df(P_FILE, edited_p)
+            st.success("仕込みデータの変更を保存しました")
+            st.rerun()
 
 # ==========================================
 # タブ3：双方向トレース検索
@@ -127,57 +176,4 @@ with t3:
     if df_p.empty:
         st.info("まだ仕込み・紐づけ記録がありません")
     else:
-        r_info = df_r[["原料名", "ロットNo", "仕入先", "賞味期限"]]
-        merged = pd.merge(
-            df_p,
-            r_info,
-            left_on=["使用原料", "原料ロットNo"],
-            right_on=["原料名", "ロットNo"],
-            how="left",
-        ).drop(columns=["原料名", "ロットNo"])
-
-        m_back = "トレースバック（製品ロット → 使用原料を追跡）"
-        m_fwd = "トレースフォワード（原料ロット → 製造された製品を追跡）"
-        mode = st.radio("追跡方向を選択", [m_back, m_fwd], horizontal=True)
-
-        if mode == m_back:
-            c1, c2 = st.columns(2)
-            p_lots = ["すべて"] + sorted(merged["製造ロットNo"].dropna().unique().tolist())
-            sel_p_lot = c1.selectbox("製造ロットNoを選択", p_lots)
-            kw_p = c2.text_input("または製品名・ロット一部で検索")
-
-            res = merged.copy()
-            if sel_p_lot != "すべて":
-                res = res[res["製造ロットNo"] == sel_p_lot]
-            if kw_p.strip():
-                k = kw_p.strip()
-                cond = res["製造ロットNo"].str.contains(k, na=False) | res["製品名"].str.contains(k, na=False)
-                res = res[cond]
-
-            st.subheader(f"使用された原料ロット一覧（{len(res)}件）")
-            cols_back = ["製造ロットNo", "製品名", "仕込み日時", "使用原料", "原料ロットNo", "仕入先", "賞味期限", "使用数量", "単位", "担当者"]
-            st.dataframe(res[cols_back], use_container_width=True, hide_index=True)
-            fname = "traceback.csv"
-
-        else:
-            c1, c2, c3 = st.columns(3)
-            sel_mat_f = c1.selectbox("原料名で絞り込み", ["すべて"] + MATS)
-            sub_m = merged if sel_mat_f == "すべて" else merged[merged["使用原料"] == sel_mat_f]
-            r_lots = ["すべて"] + sorted(sub_m["原料ロットNo"].dropna().unique().tolist())
-            sel_r_lot = c2.selectbox("原料ロットNoを選択", r_lots)
-            kw_r = c3.text_input("または原料ロット一部で検索")
-
-            res = sub_m.copy()
-            if sel_r_lot != "すべて":
-                res = res[res["原料ロットNo"] == sel_r_lot]
-            if kw_r.strip():
-                k = kw_r.strip()
-                res = res[res["原料ロットNo"].str.contains(k, na=False)]
-
-            st.subheader(f"この原料が使用された製品バッチ一覧（{len(res)}件）")
-            cols_fwd = ["使用原料", "原料ロットNo", "仕入先", "賞味期限", "製造ロットNo", "製品名", "仕込み日時", "使用数量", "単位", "担当者"]
-            st.dataframe(res[cols_fwd], use_container_width=True, hide_index=True)
-            fname = "traceforward.csv"
-
-        csv = res.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("検索結果をCSVダウンロード", csv, fname, "text/csv")
+        r
